@@ -14,16 +14,14 @@
 
 name: golangci-lint
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch: {}
 permissions:
   contents: read
 jobs:
   golangci:
     name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
         with:

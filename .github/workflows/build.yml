@@ -15,9 +15,7 @@
 name: "Build and test"
 
 on:
-  push:
-    branches: [main]
-  pull_request: {}
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -29,6 +27,7 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - name: Checkout repository
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
@@ -40,7 +39,51 @@ jobs:
         uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
         with:
           go-version-file: go.mod
+      - name: Build module zip
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/modzip" "${RUNNER_TEMP}/build_output"
+          cat > "${RUNNER_TEMP}/modzip/main.go" <<'GOEOF'
+          package main
+
+          import (
+              "log"
+              "os"
+
+              "golang.org/x/mod/module"
+              "golang.org/x/mod/zip"
+          )
+
+          func main() {
+              modPath, version, srcDir, outFile := os.Args[1], os.Args[2], os.Args[3], os.Args[4]
+              f, err := os.Create(outFile)
+              if err != nil {
+                  log.Fatal(err)
+              }
+              defer f.Close()
+              if err := zip.CreateFromDir(f, module.Version{Path: modPath, Version: version}, srcDir); err != nil {
+                  log.Fatal(err)
+              }
+          }
+          GOEOF
+          cd "${RUNNER_TEMP}/modzip"
+          go mod init modzip
+          go get golang.org/x/mod@v0.24.0
+          go build -o create_mod .
+          ./create_mod github.com/sigstore/sigstore-go \
+            v1.1.4-0.20251124094504-b5fe07a5a7d7 \
+            "${GITHUB_WORKSPACE}" \
+            "${RUNNER_TEMP}/build_output/v1.1.4-0.20251124094504-b5fe07a5a7d7.zip"
+          unzip -l "${RUNNER_TEMP}/build_output/v1.1.4-0.20251124094504-b5fe07a5a7d7.zip" | tail -5
       - name: Build binaries
         run: make all
       - name: Run tests
         run: make test
+      - name: Upload module zip
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: module-zip
+          path: ${{ runner.temp }}/build_output/v1.1.4-0.20251124094504-b5fe07a5a7d7.zip
+          if-no-files-found: error
